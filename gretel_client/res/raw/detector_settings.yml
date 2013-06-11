@@ -1,0 +1,4 @@
+%YAML:1.0
+thresh: 30
+octaves: 4
+patternScale: 1.0
