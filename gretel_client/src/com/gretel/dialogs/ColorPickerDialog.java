@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.gretel;
+package com.gretel.dialogs;
 
 import android.os.Bundle;
 import android.app.Dialog;

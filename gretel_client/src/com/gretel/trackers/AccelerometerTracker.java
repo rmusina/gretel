@@ -5,6 +5,8 @@ import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 
+import com.gretel.trakers.objects.Quadrangle;
+
 public class AccelerometerTracker {
 
 	private Quadrangle referenceQuad;

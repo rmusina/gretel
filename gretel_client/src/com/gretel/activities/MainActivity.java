@@ -1,9 +1,11 @@
-package com.gretel;
+package com.gretel.activities;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.CameraBridgeViewBase;
@@ -16,18 +18,27 @@ import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.Point;
 import org.opencv.core.Scalar;
-import org.opencv.highgui.Highgui;
 
+import com.grete.trackers.tasks.FeatureTrackerTask;
+import com.grete.trackers.tasks.TrackingListener;
+import com.gretel.R;
+import com.gretel.imageprocessors.BitmapConverter;
+import com.gretel.imageprocessors.BitmapStorage;
+import com.gretel.services.controllers.JsonGetRequestIntentService;
+import com.gretel.services.controllers.MultipartPostRequestIntentService;
+import com.gretel.services.controllers.ServiceResultReceiver;
+import com.gretel.services.controllers.ServiceStatus;
 import com.gretel.trackers.AccelerometerTracker;
 import com.gretel.trackers.FeatureTracker;
-import com.gretel.trackers.Quadrangle;
-import com.gretel.trackers.TrackingListener;
-import com.gretel.utils.BitmapConverter;
-import com.gretel.utils.BitmapStorage;
+import com.gretel.trakers.objects.Quadrangle;
+import com.gretel.trakers.objects.TrackableObject;
 
 import android.os.Bundle;
+import android.os.Handler;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.hardware.Camera;
 import android.hardware.Sensor;
@@ -39,11 +50,15 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
 
-public class MainActivity extends Activity implements CvCameraViewListener2, View.OnTouchListener, SensorEventListener, TrackingListener  {
+public class MainActivity extends Activity implements 
+				CvCameraViewListener2, 
+				View.OnTouchListener, 
+				TrackingListener,
+				ServiceResultReceiver.Receiver {
 	
 	private final Scalar RECTANGLE_COLOR = new Scalar(255);
 	
-	private final int TRACKING_FREQUENCY = 5;
+	private final int TRACKING_FREQUENCY = 3;
 		
 	private final String DETECTOR_SETTINGS_FILE_NAME = "detector_settings.yml";
 	
@@ -52,6 +67,8 @@ public class MainActivity extends Activity implements CvCameraViewListener2, Vie
     public final static String BOUNDING_RECTANGLE = "com.gretel.BOUNDING_RECTANGLE";
 
 	public static final String DRAWING_SURFACE_FILE_NAME = "com.gretel.DRAWING_SURFACE";
+	
+	private final String SERVICE_URL = "http://192.168.0.103:8000/artefacts/";
 	
 	private CameraBridgeViewBase openCvCameraView;
 	
@@ -63,33 +80,15 @@ public class MainActivity extends Activity implements CvCameraViewListener2, Vie
 	
 	private Quadrangle rectangle = new Quadrangle();
 	
-	private SensorManager sensorManager;
-	
-	private Sensor accelerometer;
-	
-	private Sensor geomagnetic;
-	
-	private float[] magneticValues;
-	
-	private float[] accelerometerValues;
-
-	private float azimuthAngle;
-
-	private float pitchAngle;
-
-	private float rollAngle;
-	
-	private float[] rotationMatrix = new float[9];
-	
-	private float[] referenceRotationMatrix; 
-	
 	private boolean drawRectangle = false;
 
 	private boolean trackFeatures = false;
 	
 	private FeatureTracker featureTracker;
 	
-	private AccelerometerTracker accTracker;
+	private List<TrackableObject> prevTrackedObjects = new ArrayList<TrackableObject>();
+	
+	private ServiceResultReceiver serviceResultReceiver;
 	
 	private BaseLoaderCallback mLoaderCallback = new BaseLoaderCallback(this) {
 	    @Override
@@ -147,7 +146,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2, Vie
 	    	}
 	    }
 	};
-	
+
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
@@ -158,11 +157,8 @@ public class MainActivity extends Activity implements CvCameraViewListener2, Vie
 		this.openCvCameraView.setVisibility(SurfaceView.VISIBLE);
 		this.openCvCameraView.setCvCameraViewListener(this);
 		
-		this.accTracker = new AccelerometerTracker();
-
-		this.sensorManager = (SensorManager)getSystemService(SENSOR_SERVICE);
-		this.accelerometer = this.sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-		this.geomagnetic = this.sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
+		this.serviceResultReceiver = new ServiceResultReceiver(new Handler());
+        this.serviceResultReceiver.setReceiver(this);
 	}
 
 	@Override
@@ -170,18 +166,16 @@ public class MainActivity extends Activity implements CvCameraViewListener2, Vie
 	{
 	    super.onResume();
 
-        this.sensorManager.registerListener(this, this.accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
-        this.sensorManager.registerListener(this, this.geomagnetic, SensorManager.SENSOR_DELAY_NORMAL);
-        
 	    OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION_2_4_5, this, mLoaderCallback);
+	    if (this.prevTrackedObjects.isEmpty()) {
+	    	this.getArtefactData();
+	    }
 	}
 	
 	@Override
 	public void onPause()
 	{
 		super.onPause();
-		
-		this.sensorManager.unregisterListener(this);
 		
 		if (this.openCvCameraView != null)
 			this.openCvCameraView.disableView();
@@ -192,6 +186,42 @@ public class MainActivity extends Activity implements CvCameraViewListener2, Vie
 		
 		if (this.openCvCameraView != null)
 			this.openCvCameraView.disableView();
+	}
+	
+	private void getArtefactData() {
+		final Intent intent = new Intent(this, JsonGetRequestIntentService.class);
+		intent.putExtra(MultipartPostRequestIntentService.RESULT_RECEIVER, this.serviceResultReceiver);
+        intent.putExtra(MultipartPostRequestIntentService.REQUEST_URL, this.SERVICE_URL);
+        
+        startService(intent);
+	}
+	
+	private void showErrorMessage(String errorMessage) {
+		AlertDialog.Builder alertDialogBuilder = new AlertDialog.Builder(this);
+		alertDialogBuilder.setTitle("Error");
+		alertDialogBuilder.setMessage(errorMessage);
+		alertDialogBuilder.setNeutralButton("OK", new DialogInterface.OnClickListener() {
+			public void onClick(DialogInterface dialog,int id) {
+				dialog.cancel();
+			}
+		});
+		
+		AlertDialog alertDialog = alertDialogBuilder.create();
+		alertDialog.show();
+	}
+
+	@Override
+	public void onReceiveResult(int resultCode, Bundle resultData) {
+		switch (resultCode) {
+			case ServiceStatus.RUNNING:
+				break;
+			case ServiceStatus.FINISHED:
+				showErrorMessage(resultData.getString(Intent.EXTRA_TEXT));
+				break;
+			case ServiceStatus.ERROR:
+				showErrorMessage(resultData.getString(Intent.EXTRA_TEXT));
+				break;
+		}
 	}
 
 	public void onCameraViewStarted(int width, int height) {
@@ -210,44 +240,32 @@ public class MainActivity extends Activity implements CvCameraViewListener2, Vie
 		this.grayscaleFrame = inputFrame.gray();
 		
 		if (this.drawRectangle) {
-			Core.rectangle(this.rgbaFrame, this.rectangle.getPoint1(), this.rectangle.getPoint3(), this.RECTANGLE_COLOR, 3);
+			this.rectangle.draw(this.rgbaFrame, this.RECTANGLE_COLOR);
 		} else if (this.trackFeatures) {
-			/*if (this.framesSinceLastTracking == this.TRACKING_FREQUENCY) {
+			if (this.framesSinceLastTracking == this.TRACKING_FREQUENCY) {
 				new FeatureTrackerTask(this, this.featureTracker).execute(this.grayscaleFrame);
 				this.framesSinceLastTracking = 0;
 			}
 			
-			float[] angleChange = new float[3];
-			SensorManager.getAngleChange(angleChange, this.rotationMatrix, this.referenceRotationMatrix);
-			this.rectangle = this.accTracker.track(new float[] {this.azimuthAngle, this.pitchAngle, this.rollAngle});
-			
-			
 			this.framesSinceLastTracking++;
-			this.drawLastDetectedQuad();*/
-		}
-		/*
-		DecimalFormat df = new DecimalFormat("0.00##");
-	    Core.putText(this.rgbaFrame, "az " + df.format(this.azimuthAngle), new Point(10, 30), 3, 1, new Scalar(255, 0, 0, 255), 2);
-	    Core.putText(this.rgbaFrame, "pi " + df.format(this.pitchAngle), new Point(10, 60), 3, 1, new Scalar(255, 0, 0, 255), 2);
-	    Core.putText(this.rgbaFrame, "ro " + df.format(this.rollAngle), new Point(10, 90), 3, 1, new Scalar(255, 0, 0, 255), 2);
-		*/
-		
+			this.drawTrackableObjects(this.prevTrackedObjects);
+		}		
 		
 		return this.rgbaFrame;
 	}
-	
+
 	@Override
-	public void onTrackingFinished(Quadrangle detectedQuad) {
-		if (this.trackFeatures) {
-			if (detectedQuad != null && !detectedQuad.isMalformed()) {
-				this.rectangle = detectedQuad;
-			}
-			this.drawLastDetectedQuad();
+	public void onTrackingFinished(List<TrackableObject> result) {
+		if (this.trackFeatures && !result.isEmpty()) {
+			drawTrackableObjects(result);
+			this.prevTrackedObjects = result;
 		}
 	}
 	
-	private void drawLastDetectedQuad() {
-		Core.polylines(this.rgbaFrame, this.rectangle.asPolyLineList(), true, this.RECTANGLE_COLOR, 3);
+	private void drawTrackableObjects(List<TrackableObject> trackableObjects) {
+		for (TrackableObject trackedObject : trackableObjects) {
+			trackedObject.draw(this.rgbaFrame, this.RECTANGLE_COLOR);
+		}
 	}
 	
 	private void onRectangleSelectionStarted(MotionEvent event) {
@@ -269,18 +287,16 @@ public class MainActivity extends Activity implements CvCameraViewListener2, Vie
 	}
 	
 	private void onRectangleSelectionCompleted() {
-		//this.featureTracker.setTarget(this.grayscaleFrame, this.rectangle);
-		//this.referenceRotationMatrix = this.rotationMatrix.clone();
-		//this.accTracker.setTarget(this.rectangle);
+		this.featureTracker.addTarget(this.grayscaleFrame, this.rectangle);
 		
-		BitmapStorage bitmapStorage = new BitmapStorage(this);
+		/*BitmapStorage bitmapStorage = new BitmapStorage(this);
 		BitmapConverter bitmapConverter = new BitmapConverter();
 		String bitmapFileName = bitmapStorage.saveBitmapToStorage(bitmapConverter.fromMat(this.rgbaFrame));
 		
 		Intent paintIntent = new Intent(this, PaintActivity.class);
 		paintIntent.putExtra(BOUNDING_RECTANGLE, this.rectangle);  
 		paintIntent.putExtra(DRAWING_SURFACE_FILE_NAME, bitmapFileName);
-		startActivity(paintIntent);
+		startActivity(paintIntent);*/
 	}
 	
 	private void toggleRectDrawingAndTracking(boolean isDrawingRect){
@@ -310,33 +326,5 @@ public class MainActivity extends Activity implements CvCameraViewListener2, Vie
 	    }
 	    
 	    return true;
-	}
-
-	@Override
-	public void onAccuracyChanged(Sensor arg0, int arg1) {
-	}
-
-	@Override
-	public void onSensorChanged(SensorEvent event) {
-		/*switch (event.sensor.getType()) {
-			case Sensor.TYPE_MAGNETIC_FIELD:
-				this.magneticValues = event.values.clone();
-				break;
-			case Sensor.TYPE_ACCELEROMETER:
-				this.accelerometerValues = event.values.clone();
-				break;
-		}
-
-		if (this.magneticValues != null && this.accelerometerValues != null) {
-			SensorManager.getRotationMatrix(this.rotationMatrix, null, this.accelerometerValues, this.magneticValues);
-			SensorManager.remapCoordinateSystem(this.rotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Z, this.rotationMatrix);
-			
-			float[] orientation = new float[3];
-			SensorManager.getOrientation(this.rotationMatrix, orientation);
-			
-			this.azimuthAngle = orientation[0];
-			this.pitchAngle = orientation[1];
-			this.rollAngle = orientation[2];
-		}*/
 	}
 }

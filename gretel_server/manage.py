@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!C:\work\Gretel\env\Scripts  python
 import os
 import sys
 

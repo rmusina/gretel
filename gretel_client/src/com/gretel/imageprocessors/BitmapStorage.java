@@ -1,4 +1,4 @@
-package com.gretel.utils;
+package com.gretel.imageprocessors;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -9,11 +9,13 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 
 public class BitmapStorage {
+	private File cacheDir; 
 	
-	private Context context;
+	public BitmapStorage() {
+	}
 	
 	public BitmapStorage(Context context) {
-		this.context = context;
+		this.cacheDir = context.getCacheDir();
 	}
 	
 	public String getRandomFileName(String extension) {
@@ -21,9 +23,12 @@ public class BitmapStorage {
 		return String.format("%s.%s", fileName, extension);
 	}
 	
-	public String saveBitmapToStorage(Bitmap image) {		
-		File cacheDir = this.context.getCacheDir();
-		File storeFile = new File(cacheDir, getRandomFileName("png"));
+	public String saveBitmapToStorage(Bitmap image) {
+		if (this.cacheDir == null) {
+			throw new NullPointerException("No context was specified for BitmapStorage.");
+		}
+		
+		File storeFile = new File(this.cacheDir, getRandomFileName("png"));
 		
 		try {
 			FileOutputStream fos = new FileOutputStream(storeFile); 

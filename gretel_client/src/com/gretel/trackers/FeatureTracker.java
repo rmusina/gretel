@@ -19,6 +19,9 @@ import org.opencv.features2d.DescriptorMatcher;
 import org.opencv.features2d.FeatureDetector;
 import org.opencv.features2d.KeyPoint;
 
+import com.gretel.trakers.objects.TrackableObject;
+import com.gretel.trakers.objects.TrackingTarget;
+
 public class FeatureTracker {
 	private final int MIN_MATCH_COUNT = 10;
 		
@@ -30,33 +33,13 @@ public class FeatureTracker {
 	
 	private DescriptorMatcher matcher = DescriptorMatcher.create(DescriptorMatcher.BRUTEFORCE_HAMMING);
 		
-	private MatOfKeyPoint trainingFeatures = new MatOfKeyPoint();
-	
-	private Quadrangle rectangle;
+	private List<TrackingTarget> trackingTargets = new ArrayList<TrackingTarget>();
 	
 	public void loadTrackingSettings(File detectorSettingsFile, File descriptorSettingsFile) {
 		if (detectorSettingsFile != null) {
 			this.detector.read(detectorSettingsFile.getAbsolutePath());
 			this.descriptor.read(descriptorSettingsFile.getAbsolutePath());
 		}
-	}
-		
-	public static Mat getTrakingMask(Mat image, Quadrangle rectangle) {
-		int rows = image.rows();
-		int cols = image.cols();
-		
-		int xMin = (int)rectangle.getPoint1().x; int yMin = (int)rectangle.getPoint1().y;
-		int xMax = (int)rectangle.getPoint3().x; int yMax = (int)rectangle.getPoint3().y;
-		
-		Mat mask = new Mat(rows, cols, CvType.CV_8UC1);
-		
-		for (int x = xMin; x <= xMax; x++) {
-			for (int y = yMin; y <= yMax; y++) {
-				mask.put(y, x, 1.0);
-			}
-		}
-		
-		return mask;
 	}
 	
 	public MatOfKeyPoint detectFeatures(Mat image) {
@@ -92,18 +75,21 @@ public class FeatureTracker {
 		return matches;
 	}
 
-	public void setTarget(Mat image, Quadrangle rectangle) {
-		Mat trackingMask = getTrakingMask(image, rectangle);		
-		MatOfKeyPoint features = detectFeatures(image, trackingMask);
-		Mat featureDescription = describeFeatures(image, features);
+	public void addTarget(Mat image, TrackableObject trackableObject) {
+		Mat trackingMask = trackableObject.getTrakingMask(image);		
+		MatOfKeyPoint features = this.detectFeatures(image, trackingMask);
+		Mat featuresDescription = this.describeFeatures(image, features);
 		
+		this.trackingTargets.add(new TrackingTarget(features, featuresDescription, trackableObject));
+		this.matcher.add(Arrays.asList(featuresDescription));
+	}
+	
+	public void clearTargets() {
 		this.matcher.clear();
-		this.matcher.add(Arrays.asList(featureDescription));
-		this.trainingFeatures = features;
-		this.rectangle = rectangle;
+		this.trackingTargets.clear();
 	}
 
-	public Quadrangle track(Mat image) {
+	public TrackableObject track(Mat image, TrackingTarget trackingTarget) {
 		MatOfKeyPoint frameFeatures = this.detectFeatures(image);
 		Mat frameFeaturesDescription = this.describeFeatures(image, frameFeatures);
 		List<DMatch> matches = this.getMatches(image, frameFeaturesDescription, frameFeatures);
@@ -115,7 +101,7 @@ public class FeatureTracker {
 			return null;
 		}
 		
-		KeyPoint[] trainingKeyPoints = this.trainingFeatures.toArray();
+		KeyPoint[] trainingKeyPoints = trackingTarget.getFeatures().toArray();
 		KeyPoint[] frameKeyPoints = frameFeatures.toArray(); 
 		
 		List<Point> trainingPoints = new ArrayList<Point>(matches.size());
@@ -134,35 +120,34 @@ public class FeatureTracker {
 		
 		Mat status = new Mat();
 		Mat homography = Calib3d.findHomography(trainingPoints2f, framePoints2f, Calib3d.RANSAC, this.HOMOGRAPHY_THRESHOLD, status);
-
-		/*double[][] h = new double[3][3];
-		
-		for (int i = 0; i < 3; i++) {
-			for (int j = 0; j < 3; j++) {
-				h[i][j] = homography.get(i, j)[0];
-			}
-		}*/
 		
 		trainingPoints2f.release();
 		framePoints2f.release();
 		frameFeatures.release();
 		frameFeaturesDescription.release();
 		
-		if (Core.sumElems(homography).val[0] < this.MIN_MATCH_COUNT) {
-			status.release();
-			homography.release();
-			
-			return null;
+		TrackableObject projectedObject = null;
+		if (Core.sumElems(status).val[0] >= this.MIN_MATCH_COUNT) {
+			projectedObject = trackingTarget.getTrackedObject().perspectiveTransform(homography);
 		}
 
-		Mat frameQuad = new Mat(4, 1, CvType.CV_32FC2);
-		Core.perspectiveTransform(this.rectangle.asPerspectiveTransformMatrix(), frameQuad, homography);		
-		Quadrangle projectedQuad = new Quadrangle(frameQuad);
-		
-		frameQuad.release();
 		status.release();
 		homography.release();
 
-		return projectedQuad;
+		return projectedObject;
+	}
+	
+	public List<TrackableObject> trackAll(Mat image) {
+		List<TrackableObject> trackedObjects = new ArrayList<TrackableObject>();
+		
+		for (TrackingTarget target : this.trackingTargets) {
+			TrackableObject trackedObject = this.track(image, target);
+			
+			if (trackedObject != null) {
+				trackedObjects.add(trackedObject);
+			}
+		}
+		
+		return trackedObjects;
 	}
 }

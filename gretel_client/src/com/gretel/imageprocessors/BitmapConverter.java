@@ -1,4 +1,4 @@
-package com.gretel.utils;
+package com.gretel.imageprocessors;
 
 import org.opencv.android.Utils;
 import org.opencv.core.CvType;

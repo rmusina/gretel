@@ -1,24 +1,26 @@
-package com.gretel.trackers;
+package com.gretel.trakers.objects;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
 import org.opencv.core.Point;
+import org.opencv.core.Scalar;
 
 import android.os.Parcel;
 import android.os.Parcelable;
 
-public class Quadrangle implements Parcelable {
+public class Quadrangle implements Parcelable, TrackableObject {
 
 	/*
 	 * p4      p1
 	 * 
 	 * p3      p2
 	 */
-	
+		
 	private Point point1;
 
 	private Point point2;
@@ -126,38 +128,6 @@ public class Quadrangle implements Parcelable {
 		return polyLinePoints;
 	}
 
-	public boolean isMalformed() {
-
-		/*if (this.point1 == this.point2 || 
-			this.point1 == this.point3 || 
-			this.point1 == this.point4) {
-			return true;
-		}
-		
-		if (this.point2 == this.point3 || 
-			this.point2 == this.point4) {
-			return true;
-		}
-		
-		if (this.point3 == this.point4) {
-			return true;
-		}
-		
-		if (this.point1.x > this.point2.x || 
-			this.point1.x > this.point3.x ||
-			this.point4.x > this.point2.x || 
-			this.point4.x > this.point3.x) {
-			return true;
-		}
-		
-		if (this.point1.y > this.point4.y || 
-			this.point2.y > this.point3.y) {
-			return true;
-		}*/
-		
-		return false;
-	}
-
 	@Override
 	public int describeContents() {
 		return 0;
@@ -169,5 +139,71 @@ public class Quadrangle implements Parcelable {
 		out.writeDouble(point2.x); out.writeDouble(point2.y);
 		out.writeDouble(point3.x); out.writeDouble(point3.y);
 		out.writeDouble(point4.x); out.writeDouble(point4.y);
+	}
+
+	@Override
+	public Mat getTrakingMask(Mat image) {
+		int rows = image.rows();
+		int cols = image.cols();
+		
+		int xMin = (int)this.point1.x; int yMin = (int)this.point1.y;
+		int xMax = (int)this.point3.x; int yMax = (int)this.point3.y;
+		
+		Mat mask = new Mat(rows, cols, CvType.CV_8UC1);
+		
+		for (int x = xMin; x <= xMax; x++) {
+			for (int y = yMin; y <= yMax; y++) {
+				mask.put(y, x, 1.0);
+			}
+		}
+		
+		return mask;
+	}
+
+	@Override
+	public TrackableObject perspectiveTransform(Mat transformMatrix) {
+		Mat frameQuad = new Mat(4, 1, CvType.CV_32FC2);
+		Core.perspectiveTransform(this.asPerspectiveTransformMatrix(), frameQuad, transformMatrix);		
+		Quadrangle projectedQuad = new Quadrangle(frameQuad);
+		frameQuad.release();
+		
+		return projectedQuad;
+	}
+
+	@Override
+	public boolean isShapeValid() {
+		/*if (this.point1 == this.point2 || 
+			this.point1 == this.point3 || 
+			this.point1 == this.point4) {
+			return false;
+		}
+		
+		if (this.point2 == this.point3 || 
+			this.point2 == this.point4) {
+			return false;
+		}
+		
+		if (this.point3 == this.point4) {
+			return false;
+		}
+		
+		if (this.point1.x > this.point2.x || 
+			this.point1.x > this.point3.x ||
+			this.point4.x > this.point2.x || 
+			this.point4.x > this.point3.x) {
+			return false;
+		}
+		
+		if (this.point1.y > this.point4.y || 
+			this.point2.y > this.point3.y) {
+			return false;
+		}*/
+		
+		return true;
+	}
+
+	@Override
+	public void draw(Mat imageFrame, Scalar color) {
+		Core.polylines(imageFrame, this.asPolyLineList(), true, color, 3);
 	}
 }
