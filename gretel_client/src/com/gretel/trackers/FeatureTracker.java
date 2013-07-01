@@ -1,9 +1,7 @@
 package com.gretel.trackers;
 
-import java.io.File;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import com.gretel.trakers.objects.TrackableObject;
+import com.gretel.trakers.objects.TrackingTarget;
 
 import org.opencv.calib3d.Calib3d;
 import org.opencv.core.Core;
@@ -19,10 +17,11 @@ import org.opencv.features2d.DescriptorMatcher;
 import org.opencv.features2d.FeatureDetector;
 import org.opencv.features2d.KeyPoint;
 
-import com.gretel.trakers.objects.TrackableObject;
-import com.gretel.trakers.objects.TrackingTarget;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
-public class FeatureTracker {
+public class FeatureTracker extends Tracker{
 	private final int MIN_MATCH_COUNT = 10;
 		
 	private final double HOMOGRAPHY_THRESHOLD = 3.0;
@@ -58,10 +57,10 @@ public class FeatureTracker {
 		return descriptors;
 	}
 	
-	public List<DMatch> getMatches(Mat image, Mat queryDescriptors, MatOfKeyPoint queryKeyPoints) {
+	public List<DMatch> getMatches(Mat image, Mat trainingDescriptors, Mat queryDescriptors) {
 		List<MatOfDMatch> rawMatches = new ArrayList<MatOfDMatch>();		
-		this.matcher.knnMatch(queryDescriptors, rawMatches, 2);
-		
+		this.matcher.knnMatch(queryDescriptors, trainingDescriptors, rawMatches, 2);
+
 		List<DMatch> matches = new ArrayList<DMatch>(rawMatches.size());
 				
 		for (MatOfDMatch matchMat : rawMatches) {
@@ -75,24 +74,10 @@ public class FeatureTracker {
 		return matches;
 	}
 
-	public void addTarget(Mat image, TrackableObject trackableObject) {
-		Mat trackingMask = trackableObject.getTrakingMask(image);		
-		MatOfKeyPoint features = this.detectFeatures(image, trackingMask);
-		Mat featuresDescription = this.describeFeatures(image, features);
-		
-		this.trackingTargets.add(new TrackingTarget(features, featuresDescription, trackableObject));
-		this.matcher.add(Arrays.asList(featuresDescription));
-	}
-	
-	public void clearTargets() {
-		this.matcher.clear();
-		this.trackingTargets.clear();
-	}
-
 	public TrackableObject track(Mat image, TrackingTarget trackingTarget) {
 		MatOfKeyPoint frameFeatures = this.detectFeatures(image);
 		Mat frameFeaturesDescription = this.describeFeatures(image, frameFeatures);
-		List<DMatch> matches = this.getMatches(image, frameFeaturesDescription, frameFeatures);
+		List<DMatch> matches = this.getMatches(image, trackingTarget.getFeaturesDescription(), frameFeaturesDescription);
 		
 		if (matches.size() < this.MIN_MATCH_COUNT) {
 			frameFeatures.release();
@@ -135,19 +120,5 @@ public class FeatureTracker {
 		homography.release();
 
 		return projectedObject;
-	}
-	
-	public List<TrackableObject> trackAll(Mat image) {
-		List<TrackableObject> trackedObjects = new ArrayList<TrackableObject>();
-		
-		for (TrackingTarget target : this.trackingTargets) {
-			TrackableObject trackedObject = this.track(image, target);
-			
-			if (trackedObject != null) {
-				trackedObjects.add(trackedObject);
-			}
-		}
-		
-		return trackedObjects;
 	}
 }

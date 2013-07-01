@@ -1,15 +1,17 @@
 package com.gretel.views;
 
-import com.gretel.trakers.objects.Quadrangle;
-
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.view.MotionEvent;
 import android.view.View;
+
+import com.gretel.trakers.objects.Quadrangle;
 
 @SuppressLint("ViewConstructor")
 public class PaintView extends View {        
@@ -55,12 +57,23 @@ public class PaintView extends View {
     }
 
     public Bitmap getBitmap() {
-    	return this.bitmap;
+
+        Bitmap croppedBitmap = Bitmap.createBitmap(this.bitmap,
+                (int)boundingRect.getPoint1().x,
+                (int)boundingRect.getPoint1().y,
+                (int)(boundingRect.getPoint3().x - boundingRect.getPoint1().x),
+                (int)(boundingRect.getPoint3().y - boundingRect.getPoint1().y));
+
+    	return croppedBitmap;
     }
     
     public Bitmap getDrawingSurface() {
 		return drawingSurface;
 	}
+
+    public Quadrangle getBoundingRect() {
+        return boundingRect;
+    }
 
 	public void setDrawingSurface(Bitmap drawingSurface) {
 		this.drawingSurface = drawingSurface;
@@ -79,6 +92,10 @@ public class PaintView extends View {
         super.onSizeChanged(w, h, oldw, oldh);
         this.bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         this.canvas = new Canvas(this.bitmap);
+
+        Paint transPainter = new Paint();
+        transPainter.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+        canvas.drawRect(0, 0, bitmap.getWidth(), bitmap.getHeight(), transPainter);
     }
 
     @Override

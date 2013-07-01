@@ -6,6 +6,6 @@ import org.opencv.core.Scalar;
 public interface TrackableObject {
 	void draw(Mat imageFrame, Scalar color);
 	boolean isShapeValid();
-	Mat getTrakingMask(Mat image);
+	Mat getTrackingMask(Mat image);
 	TrackableObject perspectiveTransform(Mat transformMatrix);
 }

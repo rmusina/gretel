@@ -1,11 +1,27 @@
 package com.gretel.activities;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.os.Bundle;
+import android.view.MotionEvent;
+import android.view.SurfaceView;
+import android.view.View;
+import android.view.WindowManager;
+
+import com.gretel.R;
+import com.gretel.imageprocessors.BitmapConverter;
+import com.gretel.imageprocessors.BitmapStorage;
+import com.gretel.trackers.FeatureTracker;
+import com.gretel.trackers.TrackingListener;
+import com.gretel.trackers.WallTracker;
+import com.gretel.trakers.objects.Quadrangle;
+import com.gretel.trakers.objects.TrackableImage;
+import com.gretel.trakers.objects.TrackableObject;
+import com.gretel.trakers.objects.TrackingTarget;
 
 import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.CameraBridgeViewBase;
@@ -13,48 +29,24 @@ import org.opencv.android.CameraBridgeViewBase.CvCameraViewFrame;
 import org.opencv.android.CameraBridgeViewBase.CvCameraViewListener2;
 import org.opencv.android.LoaderCallbackInterface;
 import org.opencv.android.OpenCVLoader;
-import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
+import org.opencv.core.MatOfKeyPoint;
 import org.opencv.core.Point;
 import org.opencv.core.Scalar;
+import org.opencv.imgproc.Imgproc;
 
-import com.grete.trackers.tasks.FeatureTrackerTask;
-import com.grete.trackers.tasks.TrackingListener;
-import com.gretel.R;
-import com.gretel.imageprocessors.BitmapConverter;
-import com.gretel.imageprocessors.BitmapStorage;
-import com.gretel.services.controllers.JsonGetRequestIntentService;
-import com.gretel.services.controllers.MultipartPostRequestIntentService;
-import com.gretel.services.controllers.ServiceResultReceiver;
-import com.gretel.services.controllers.ServiceStatus;
-import com.gretel.trackers.AccelerometerTracker;
-import com.gretel.trackers.FeatureTracker;
-import com.gretel.trakers.objects.Quadrangle;
-import com.gretel.trakers.objects.TrackableObject;
-
-import android.os.Bundle;
-import android.os.Handler;
-import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.Context;
-import android.content.DialogInterface;
-import android.content.Intent;
-import android.hardware.Camera;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
-import android.view.MotionEvent;
-import android.view.SurfaceView;
-import android.view.View;
-import android.view.WindowManager;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends Activity implements 
 				CvCameraViewListener2, 
 				View.OnTouchListener, 
-				TrackingListener,
-				ServiceResultReceiver.Receiver {
+				TrackingListener {
 	
 	private final Scalar RECTANGLE_COLOR = new Scalar(255);
 	
@@ -67,8 +59,6 @@ public class MainActivity extends Activity implements
     public final static String BOUNDING_RECTANGLE = "com.gretel.BOUNDING_RECTANGLE";
 
 	public static final String DRAWING_SURFACE_FILE_NAME = "com.gretel.DRAWING_SURFACE";
-	
-	private final String SERVICE_URL = "http://192.168.0.103:8000/artefacts/";
 	
 	private CameraBridgeViewBase openCvCameraView;
 	
@@ -85,35 +75,60 @@ public class MainActivity extends Activity implements
 	private boolean trackFeatures = false;
 	
 	private FeatureTracker featureTracker;
-	
-	private List<TrackableObject> prevTrackedObjects = new ArrayList<TrackableObject>();
-	
-	private ServiceResultReceiver serviceResultReceiver;
-	
+
+    private WallTracker wallTracker;
+
+	private List<TrackingTarget> trackingTargets = new ArrayList<TrackingTarget>();
+
 	private BaseLoaderCallback mLoaderCallback = new BaseLoaderCallback(this) {
-	    @Override
-	    public void onManagerConnected(int status) {
-	        switch (status) {
-	            case LoaderCallbackInterface.SUCCESS:
-	            {	            	
-	            	openCvCameraView.setOnTouchListener(MainActivity.this);
-	            	openCvCameraView.enableView();
-	            	
-					featureTracker = new FeatureTracker();
-					File detectorSettingsFile = writeSettingsFile(DETECTOR_SETTINGS_FILE_NAME, R.raw.detector_settings);
-					File descriptorSettingsFile = writeSettingsFile(DESCRIPTOR_SETTINGS_FILE_NAME, R.raw.descriptor_settings);
-					
-					featureTracker.loadTrackingSettings(detectorSettingsFile, descriptorSettingsFile);
-					
-					removeSettingsFile(detectorSettingsFile);			
-					removeSettingsFile(descriptorSettingsFile);
-	            } break;
-	            default:
-	            {
-	                super.onManagerConnected(status);
-	            } break;
-	        }
-	    }
+            @Override
+            public void onManagerConnected(int status) {
+                switch (status) {
+                    case LoaderCallbackInterface.SUCCESS:
+                    {
+                        openCvCameraView.setOnTouchListener(MainActivity.this);
+                        openCvCameraView.enableView();
+
+                        featureTracker = new FeatureTracker();
+                        File detectorSettingsFile = writeSettingsFile(DETECTOR_SETTINGS_FILE_NAME, R.raw.detector_settings);
+                        File descriptorSettingsFile = writeSettingsFile(DESCRIPTOR_SETTINGS_FILE_NAME, R.raw.descriptor_settings);
+
+                        featureTracker.loadTrackingSettings(detectorSettingsFile, descriptorSettingsFile);
+
+                        removeSettingsFile(detectorSettingsFile);
+                        removeSettingsFile(descriptorSettingsFile);
+
+                        wallTracker = new WallTracker();
+                        Intent intent = getIntent();
+
+                        if (intent.hasExtra(PaintActivity.BOUNDING_RECTANGLE)) {
+                            BitmapStorage bitmapStorage = new BitmapStorage(getApplicationContext());
+                            BitmapConverter converter = new BitmapConverter();
+
+                            Quadrangle boundingRect = intent.getParcelableExtra(PaintActivity.BOUNDING_RECTANGLE);
+                            String drawingSurfaceFileName = intent.getStringExtra(PaintActivity.DRAWING_SURFACE_FILE_NAME);
+                            String graffitiFileName = intent.getStringExtra(PaintActivity.GRAFITTI_FILE_NAME);
+
+                            Bitmap drawingSurface = bitmapStorage.getBitmapFromStorage(drawingSurfaceFileName);
+                            bitmapStorage.deleteBitmapFromStorage(drawingSurfaceFileName);
+                            Mat drawingSurfaceMat = converter.toMat(drawingSurface);
+                            Imgproc.cvtColor(drawingSurfaceMat, drawingSurfaceMat, Imgproc.COLOR_RGB2GRAY);
+
+                            Bitmap graffiti = bitmapStorage.getBitmapFromStorage(graffitiFileName);
+                            bitmapStorage.deleteBitmapFromStorage(graffitiFileName);
+                            Mat graffitiMat = converter.toMat(graffiti);
+
+                            addTrackingTarget(drawingSurfaceMat, graffitiMat, boundingRect);
+                            trackFeatures = true;
+                        }
+
+                    } break;
+                    default:
+                    {
+                        super.onManagerConnected(status);
+                    } break;
+                }
+            }
 	    
 	    //hack to write resource file to disk, and read it like a regular file from the tracker object
 	    private File writeSettingsFile(String fileName, int resourceId){
@@ -151,14 +166,11 @@ public class MainActivity extends Activity implements
 	public void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-		
+
 		setContentView(R.layout.activity_main);
 		this.openCvCameraView = (CameraBridgeViewBase) findViewById(R.id.MainCameraView);
 		this.openCvCameraView.setVisibility(SurfaceView.VISIBLE);
 		this.openCvCameraView.setCvCameraViewListener(this);
-		
-		this.serviceResultReceiver = new ServiceResultReceiver(new Handler());
-        this.serviceResultReceiver.setReceiver(this);
 	}
 
 	@Override
@@ -167,9 +179,6 @@ public class MainActivity extends Activity implements
 	    super.onResume();
 
 	    OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION_2_4_5, this, mLoaderCallback);
-	    if (this.prevTrackedObjects.isEmpty()) {
-	    	this.getArtefactData();
-	    }
 	}
 	
 	@Override
@@ -181,19 +190,12 @@ public class MainActivity extends Activity implements
 			this.openCvCameraView.disableView();
 	}
 
-	public void onDestroy() {
+	@Override
+    public void onDestroy() {
 		super.onDestroy();
 		
 		if (this.openCvCameraView != null)
 			this.openCvCameraView.disableView();
-	}
-	
-	private void getArtefactData() {
-		final Intent intent = new Intent(this, JsonGetRequestIntentService.class);
-		intent.putExtra(MultipartPostRequestIntentService.RESULT_RECEIVER, this.serviceResultReceiver);
-        intent.putExtra(MultipartPostRequestIntentService.REQUEST_URL, this.SERVICE_URL);
-        
-        startService(intent);
 	}
 	
 	private void showErrorMessage(String errorMessage) {
@@ -209,21 +211,7 @@ public class MainActivity extends Activity implements
 		AlertDialog alertDialog = alertDialogBuilder.create();
 		alertDialog.show();
 	}
-
-	@Override
-	public void onReceiveResult(int resultCode, Bundle resultData) {
-		switch (resultCode) {
-			case ServiceStatus.RUNNING:
-				break;
-			case ServiceStatus.FINISHED:
-				showErrorMessage(resultData.getString(Intent.EXTRA_TEXT));
-				break;
-			case ServiceStatus.ERROR:
-				showErrorMessage(resultData.getString(Intent.EXTRA_TEXT));
-				break;
-		}
-	}
-
+	
 	public void onCameraViewStarted(int width, int height) {
 		this.rgbaFrame = new Mat(height, width, CvType.CV_8UC4);
 		this.grayscaleFrame = new Mat(height, width, CvType.CV_8UC1);
@@ -237,34 +225,37 @@ public class MainActivity extends Activity implements
 	@Override
 	public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
 		this.rgbaFrame = inputFrame.rgba();
-		this.grayscaleFrame = inputFrame.gray();
+        this.grayscaleFrame = inputFrame.gray();
 		
 		if (this.drawRectangle) {
 			this.rectangle.draw(this.rgbaFrame, this.RECTANGLE_COLOR);
 		} else if (this.trackFeatures) {
-			if (this.framesSinceLastTracking == this.TRACKING_FREQUENCY) {
-				new FeatureTrackerTask(this, this.featureTracker).execute(this.grayscaleFrame);
-				this.framesSinceLastTracking = 0;
-			}
-			
-			this.framesSinceLastTracking++;
-			this.drawTrackableObjects(this.prevTrackedObjects);
-		}		
-		
-		return this.rgbaFrame;
+            List<TrackableObject> trackedObjects = new ArrayList<TrackableObject>();
+
+            /*if (this.framesSinceLastTracking % 5 == 0) {
+                trackedObjects = this.featureTracker.trackAll(this.grayscaleFrame, this.trackingTargets);
+            } else {
+                trackedObjects = this.wallTracker.trackAll(this.grayscaleFrame, this.trackingTargets);
+            }*/
+
+            trackedObjects = this.wallTracker.trackAll(this.grayscaleFrame, this.trackingTargets);
+            //this.framesSinceLastTracking++;
+			this.drawTrackableObjects(trackedObjects);
+		}
+
+        return this.rgbaFrame;
 	}
 
 	@Override
 	public void onTrackingFinished(List<TrackableObject> result) {
 		if (this.trackFeatures && !result.isEmpty()) {
-			drawTrackableObjects(result);
-			this.prevTrackedObjects = result;
+            drawTrackableObjects(result);
 		}
 	}
 	
-	private void drawTrackableObjects(List<TrackableObject> trackableObjects) {
-		for (TrackableObject trackedObject : trackableObjects) {
-			trackedObject.draw(this.rgbaFrame, this.RECTANGLE_COLOR);
+	private void drawTrackableObjects(List<TrackableObject> trackedObjects) {
+		for (TrackableObject trackedObject : trackedObjects) {
+            trackedObject.draw(this.rgbaFrame, this.RECTANGLE_COLOR);
 		}
 	}
 	
@@ -285,18 +276,29 @@ public class MainActivity extends Activity implements
 		this.rectangle.setPoint3(new Point(xMax - xOffset, yMax - yOffset));
 		this.rectangle.setPoint4(new Point(xMin - xOffset, yMax - yOffset));
 	}
-	
+
+    private void addTrackingTarget(Mat background, Mat graffiti, Quadrangle selectedQuad) {
+        MatOfKeyPoint features = this.featureTracker.detectFeatures(
+                background,
+                selectedQuad.getTrackingMask(background));
+        Mat featuresDescription = this.featureTracker.describeFeatures(
+                background,
+                features);
+
+        TrackableImage trackableImage = new TrackableImage(graffiti, selectedQuad);
+        TrackingTarget target = new TrackingTarget(features, featuresDescription, trackableImage);
+        this.trackingTargets.add(target);
+    }
+
 	private void onRectangleSelectionCompleted() {
-		this.featureTracker.addTarget(this.grayscaleFrame, this.rectangle);
-		
-		/*BitmapStorage bitmapStorage = new BitmapStorage(this);
+        BitmapStorage bitmapStorage = new BitmapStorage(this);
 		BitmapConverter bitmapConverter = new BitmapConverter();
-		String bitmapFileName = bitmapStorage.saveBitmapToStorage(bitmapConverter.fromMat(this.rgbaFrame));
+		String bitmapFileName = bitmapStorage.saveBitmapToStorage(bitmapConverter.fromRgbaMat(this.rgbaFrame));
 		
 		Intent paintIntent = new Intent(this, PaintActivity.class);
 		paintIntent.putExtra(BOUNDING_RECTANGLE, this.rectangle);  
 		paintIntent.putExtra(DRAWING_SURFACE_FILE_NAME, bitmapFileName);
-		startActivity(paintIntent);*/
+		startActivity(paintIntent);
 	}
 	
 	private void toggleRectDrawingAndTracking(boolean isDrawingRect){

@@ -29,7 +29,7 @@ public abstract class AbstractRequestIntentService extends IntentService {
 	}
 
 	@Override
-	protected void onHandleIntent(Intent intent) {	
+	public void onHandleIntent(Intent intent) {
 		final ResultReceiver resultReceiver = 
 				intent.getParcelableExtra(RESULT_RECEIVER);
 		String url = intent.getStringExtra(REQUEST_URL);
@@ -50,7 +50,7 @@ public abstract class AbstractRequestIntentService extends IntentService {
 	}	
 	
 	private HttpResponse makeRequest(HttpRequestBase requestObject) 
-			throws ClientProtocolException, IOException
+			throws IOException
 	{
 	    DefaultHttpClient httpClient = new DefaultHttpClient();	    
 	    return httpClient.execute(requestObject);
